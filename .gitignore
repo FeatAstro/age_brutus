@@ -1,0 +1,45 @@
+# ── Catalogs ──────────────────────────────────────────────────────────────────
+data/raw/
+data/processed/*.fits
+data/processed/*.csv
+data/processed/*.vot
+data/processed/*.hdf5
+
+# ── Fitting outputs ───────────────────────────────────────────────────────────
+*.save
+*.pkl
+*_checkpoint*
+*_results*
+outputs/
+runs/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.so
+.env
+.venv/
+env/
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── OS / editor ───────────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+logs/
+
+# ── brutus submodule ──────────────────────────────────────────────────────────
+brutus/**/*.npy
+brutus/**/__pycache__/
+
+# ── Images (generated outputs — uncomment to exclude) ─────────────────────────
+# images/**/*.png
+# images/**/*.pdf
