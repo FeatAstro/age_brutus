@@ -1,0 +1,3 @@
+[submodule "brutus"]
+	path = brutus
+	url = https://github.com/joshspeagle/brutus.git
