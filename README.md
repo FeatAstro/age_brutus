@@ -14,7 +14,7 @@ Methodology follows Quintana et al. (2025).
 ## Repository layout
 
 ```
-orion-ob1/
+age_brutus/
 ├── Download_Gaia.py     # Gaia DR3 download + 2MASS/PanSTARRS joins
 ├── HDBSCAN_Gaia.py      # 5D kinematic clustering
 ├── Brutus_Gaia.py       # Bayesian isochrone fitting (brutus + dynesty)
@@ -90,7 +90,7 @@ Note: Update parameters
 python Map_Gaia.py 
 ```
 Cross-matches HDBSCAN clusters with Sanchez-Sanjuan 2024 region labels
-and produces sky plots. Output: `images/HDBSCAN/` and `images/compare/`
+and produces sky plots. Output: `images/hdbscan/` and `images/compare/`
 
 ---
 
