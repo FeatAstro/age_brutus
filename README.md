@@ -1,13 +1,13 @@
-# orion-ob1 — Star formation history of the local Milky Way
+# Star formation history of the local Milky Way
 
 M1 internship project at LIRA (2026), supervised by Alexis Quintana.
 
 **Goal**: Extend OB association membership catalogs to lower-mass, cooler stars
 in the Orion OB1 complex, combining 5D kinematic clustering with Bayesian
 isochrone fitting to derive ages, distances, extinctions, and metallicities
-for stellar groups within ~1 kpc of the Sun.
+for stellar groups within ~1 kpc of the Sun, using Brutus algorithm.
 
-Methodology follows Quintana et al. (2025) and Hernández et al. (2023).
+Methodology follows Quintana et al. (2025).
 
 ---
 
@@ -15,20 +15,18 @@ Methodology follows Quintana et al. (2025) and Hernández et al. (2023).
 
 ```
 orion-ob1/
-├── Cat/
-│   ├── raw/          # ADQL query outputs — gitignored, do not edit
-│   └── processed/    # after ZP corrections and cross-matches
-├── Py/
-│   ├── 01_query_gaia.py       # Gaia DR3 download + 2MASS/PanSTARRS joins
-│   ├── 02_hdbscan.py          # 5D kinematic clustering
-│   ├── 03_fitting.py          # Bayesian isochrone fitting (brutus + dynesty)
-│   ├── 03_map.py              # cross-match clusters with region labels
-│   ├── config.py              # PARAMS dicts per target region
-│   └── utils/
-│       ├── photometry.py      # ZP corrections, extinction, CMD cuts
-│       ├── clustering.py      # HDBSCAN wrappers and 5D scaler
-│       └── brutus_helpers.py  # worker_init, live point pre-generation
-└── brutus/           # git submodule — Speagle et al. isochrone code
+├── Download_Gaia.py     # Gaia DR3 download + 2MASS/PanSTARRS joins
+├── HDBSCAN_Gaia.py      # 5D kinematic clustering
+├── Brutus_Gaia.py       # Bayesian isochrone fitting (brutus + dynesty)
+├── Map_Gaia.py          # cross-match clusters with region labels
+├── data/
+│   ├── raw/             # ADQL query outputs — gitignored, do not edit
+│   └── processed/       # after ZP corrections and cross-matches
+├── outputs/             # per-cluster dynesty results — gitignored
+├── images/
+│   ├── HDBSCAN/         # membership and kinematic plots
+│   └── compare/         # isochrone fits and comparison plots
+└── brutus/              # git submodule — Speagle et al. isochrone code
 ```
 
 ---
@@ -37,12 +35,12 @@ orion-ob1/
 
 ```bash
 # 1. Clone with submodule
-git clone --recurse-submodules https://github.com/YOUR_USERNAME/orion-ob1.git
-cd orion-ob1
+git clone --recurse-submodules https://github.com/FeatAstro/age_brutus.git
+cd age_brutus
 
 # 2. Create conda environment
 conda env create -f environment.yml
-conda activate orion-ob1
+conda activate age_brutus
 
 # 3. Install brutus in editable mode
 pip install -e ./brutus
@@ -59,41 +57,44 @@ git submodule update --init --recursive
 
 ### Step 1 — Download photometry
 ```bash
-python Py/01_query_gaia.py --region OBP-a --test
-python Py/01_query_gaia.py --region OBP-a
+python Download_Gaia.py --test
+python Download_Gaia.py 
 ```
 Downloads Gaia DR3 cross-matched with 2MASS, PanSTARRS, and BailerJones
 distances. Applies Lindegren+2021 parallax ZP and SPICOR corrections.
-Output: `Cat/raw/{region}_raw.fits`
+Output: `data/raw/{region}_raw.fits`
+Note: Update parameters for each complex (ra, dec, ...)
 
 ### Step 2 — Kinematic membership
 ```bash
-python Py/02_hdbscan.py --region OBP-a
+python HDBSCAN_Gaia.py 
 ```
 Applies selection cuts (parallax range, σ_ϖ/ϖ, RUWE, CMD), runs HDBSCAN
 in 5D space (l, b, ϖ, μ_α*, μ_δ), and assigns membership probabilities.
-Output: `Cat/processed/{region}_members.fits`
+Output: `data/processed/{region}_members.fits`
+Note: Update parameters
 
 ### Step 3 — Isochrone fitting
 ```bash
-python Py/03_fitting.py --region OBP-a
-python Py/03_fitting.py --region OBP-a --resume   # continue interrupted run
+python Brutus_Gaia.py 
+python Brutus_Gaia.py --resume   # continue interrupted run
 ```
 Bayesian fitting with brutus (MIST models, EEP ≥ 202) and dynesty nested
 sampling. **Note**: MIST excludes pre-main-sequence stars; only use on
-regions older than ~5–10 Myr (Orion OB1 sub-regions, not the ONC).
-Output: `Cat/processed/{region}/{cluster_id}/`
+regions older than ~5–10 Myr (not the ONC for instance).
+Output: `outputs/{region}/{cluster_id}/`
+Note: Update parameters
 
 ### Step 4 — Region map
 ```bash
-python Py/03_map.py --region OBP-a
+python Map_Gaia.py 
 ```
 Cross-matches HDBSCAN clusters with Sanchez-Sanjuan 2024 region labels
-and produces sky plots.
+and produces sky plots. Output: `images/HDBSCAN/` and `images/compare/`
 
 ---
 
-## Key parameters (see `Py/config.py`)
+## Key parameters
 
 | Parameter | Typical state | Notes |
 |-----------|--------------|-------|
@@ -112,7 +113,7 @@ and produces sky plots.
 - For clusters younger than ~5–10 Myr the likelihood becomes flat
   and the outlier model dominates — this is a model constraint, not a bug
 - `StellarPop` objects cannot be pickled; workers load `stellarpop`
-  independently via `worker_init` (see `Py/utils/brutus_helpers.py`)
+  independently via `worker_init`
 
 ---
 
