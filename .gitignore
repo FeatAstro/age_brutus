@@ -1,5 +1,8 @@
 # ── Catalogs ──────────────────────────────────────────────────────────────────
-data/raw/
+data/raw/*.fits
+data/raw/*.csv
+data/raw/*.vot
+data/raw/*.hdf5
 data/processed/*.fits
 data/processed/*.csv
 data/processed/*.vot
