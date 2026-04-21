@@ -18,7 +18,7 @@ from astropy.coordinates import SkyCoord, GalacticLSR
 import astropy.units as u
 from sklearn.cluster import HDBSCAN
 
-path_data    = 'data/'
+path_data    = 'data/processed'
 path_out 	 = 'outputs/'
 path_im 	 = 'images/HDBSCAN/'
 name_complex = 'Orion_OB1'

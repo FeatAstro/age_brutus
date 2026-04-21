@@ -39,7 +39,7 @@ from tutorial_utils import find_brutus_data_file
 # ==============================================================================
 # Global settings
 # ==============================================================================
-path_data    = 'data/'
+path_data    = 'data/processed'
 path_out 	 = 'outputs/'
 name_complex = 'Orion_OB1'
 out_base     = path_out + 'brutus_' + name_complex + '/'

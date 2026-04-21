@@ -7,9 +7,20 @@ cross-matches 2MASS and PanSTARRS via the DR3 neighbour tables,
 applies the Lindegren+2021 zero-point and Maiz Apellaniz 2022
 uncertainty correction, then saves a single merged FITS file.
 
-Output : <path_out>/catalog_complete_<name>.fits
+Usage:
+    python Download_Gaia.py                        # run everything
+    python Download_Gaia.py --skip-gaia            # skip step 1
+    python Download_Gaia.py --skip-bj              # skip step 3
+    python Download_Gaia.py --skip-tmass           # skip step 4
+    python Download_Gaia.py --skip-ps              # skip step 5
+    python Download_Gaia.py --skip-fidelity        # skip step 6
+    python Download_Gaia.py --skip-gaia --skip-bj  # combine any flags
+
+Output : <path_data_processed>/catalog_complete_<name>.fits
 """
 
+import os
+import sys
 import numpy as np
 import warnings
 from astropy.table import Table, join, unique
@@ -20,135 +31,212 @@ from scipy.interpolate import CubicSpline
 warnings.simplefilter('ignore', AstropyWarning)
 Gaia.ROW_LIMIT = -1
 
-# ----------- Parameters (edit for your field) 
-path_data	 = 'data/'
+# ----------- Parameters
+path_data_raw       = 'data/raw/'
+path_data_processed = 'data/processed/'
+os.makedirs(path_data_raw, exist_ok=True)
+os.makedirs(path_data_processed, exist_ok=True)
+
 name_complex = 'Orion_OB1'
 
-# Sky box in RA/Dec — edit to match your paper's field definition
-RA_MIN  =  75.0   # deg
-RA_MAX  =  90.0   # deg
-DEC_MIN = -14.0   # deg
-DEC_MAX =  16.0   # deg
+RA_MIN  =  75.0
+RA_MAX  =  90.0
+DEC_MIN = -14.0
+DEC_MAX =  16.0
 
-# Astrometric quality cuts
-MAX_DIST_PC = 1000.0   # BailerJones r_med_geo upper cut [pc]
-MAX_G       =   19.0   # faint G-mag limit
-MIN_PLX     =    0.5   # parallax lower cut [mas]
-MIN_PLX_SNR =    5.0   # parallax / error cut
+MAX_DIST_PC = 1000.0
+MAX_G       =   19.0
+MIN_PLX     =    0.5
+MIN_PLX_SNR =    5.0
 
-# ==============================================================================
-# 1. Gaia DR3 + BailerJones
-# ==============================================================================
-gaia_query = f"""
-SELECT
-    g.source_id,
-    g.ra, g.ra_error, g.dec, g.dec_error, g.l, g.b,
-    g.parallax, g.parallax_error,
-    g.pmra, g.pmra_error, g.pmdec, g.pmdec_error,
-    g.radial_velocity, g.radial_velocity_error,
-    g.phot_g_mean_mag, g.phot_bp_mean_mag, g.phot_rp_mean_mag,
-    g.phot_g_mean_flux_over_error,
-    g.phot_bp_mean_flux_over_error,
-    g.phot_rp_mean_flux_over_error,
-    g.nu_eff_used_in_astrometry, g.pseudocolour, g.ecl_lat,
-    g.ruwe, g.astrometric_params_solved,
-    d.r_med_geo, d.r_lo_geo, d.r_hi_geo
-FROM gaiadr3.gaia_source AS g
-INNER JOIN external.gaiaedr3_distance AS d ON g.source_id = d.source_id
-WHERE g.ra  BETWEEN {RA_MIN}  AND {RA_MAX}
-  AND g.dec BETWEEN {DEC_MIN} AND {DEC_MAX}
-  AND d.r_med_geo > 0 AND d.r_med_geo < {MAX_DIST_PC}
-  AND g.phot_g_mean_mag     < {MAX_G}
-  AND g.parallax            > {MIN_PLX}
-  AND g.parallax_over_error > {MIN_PLX_SNR}
-"""
-print("Querying Gaia DR3 + BailerJones ...")
-gaia_t = Gaia.launch_job_async(gaia_query).get_results()
-print(f"  {len(gaia_t)} sources")
-gaia_t.write(path + 'raw_gaia.fits', format='fits', overwrite=True)
+# ----------- Skip flags
+SKIP_GAIA     = '--skip-gaia'     in sys.argv
+SKIP_BJ       = '--skip-bj'       in sys.argv
+SKIP_TMASS    = '--skip-tmass'    in sys.argv
+SKIP_PS       = '--skip-ps'       in sys.argv
+SKIP_FIDELITY = '--skip-fidelity' in sys.argv
+
+print("Skip flags:", flush=True)
+print(f"  gaia={SKIP_GAIA}  bj={SKIP_BJ}  tmass={SKIP_TMASS}  ps={SKIP_PS}  fidelity={SKIP_FIDELITY}", flush=True)
+
+# ----------- Helper
+def query(q):
+    t = Gaia.launch_job_async(q).get_results()
+    for col in t.colnames:
+        t.rename_column(col, col.lower())
+    return t
 
 # ==============================================================================
-# 2. Upload source IDs for server-side join
+# 0. Test
 # ==============================================================================
-Gaia.upload_table(
-    upload_resource=Table({'source_id': np.array(gaia_t['source_id'], dtype=np.int64)}),
-    table_name='my_sources')
+job = Gaia.launch_job_async("""
+SELECT TOP 100 source_id, ra, dec, parallax
+FROM gaiadr3.gaia_source
+WHERE ra BETWEEN 83 AND 84
+AND dec BETWEEN -6 AND -5
+""")
+print(job.get_results())
 
 # ==============================================================================
-# 3. 2MASS (three-table chain: best_neighbour -> join -> original_valid)
+# 1. Gaia DR3
 # ==============================================================================
-tmass_query = """
-SELECT bn.source_id AS dr3_source_id,
-       tmass.j_m, tmass.j_msigcom,
-       tmass.h_m, tmass.h_msigcom,
-       tmass.ks_m, tmass.ks_msigcom, tmass.ph_qual
-FROM user_upload.my_sources AS up
-INNER JOIN gaiadr3.tmass_psc_xsc_best_neighbour AS bn ON up.source_id = bn.source_id
-INNER JOIN gaiadr3.tmass_psc_xsc_join AS xj ON bn.clean_tmass_psc_xsc_oid = xj.clean_tmass_psc_xsc_oid
-INNER JOIN gaiadr2.tmass_original_valid AS tmass ON xj.original_psc_source_id = tmass.designation
-"""
-print("Querying 2MASS ...")
-tmass_t = Gaia.launch_job_async(tmass_query).get_results()
-print(f"  {len(tmass_t)} rows")
-tmass_t.write(path + 'raw_2mass.fits', format='fits', overwrite=True)
+if SKIP_GAIA:
+    print("Step 1: loading Gaia from file ...", flush=True)
+    gaia_t = Table.read(path_data_raw + 'raw_gaia.fits')
+    # Example of changes we can make with an existing fits file
+    #for col in gaia_t.colnames:
+    #	gaia_t.rename_column(col, col.lower())
+else:
+    gaia_query = f"""
+    SELECT
+        g.source_id,
+        g.ra, g.ra_error, g.dec, g.dec_error, g.l, g.b,
+        g.parallax, g.parallax_error,
+        g.pmra, g.pmra_error, g.pmdec, g.pmdec_error,
+        g.radial_velocity, g.radial_velocity_error,
+        g.phot_g_mean_mag, g.phot_bp_mean_mag, g.phot_rp_mean_mag,
+        g.phot_g_mean_flux_over_error,
+        g.phot_bp_mean_flux_over_error,
+        g.phot_rp_mean_flux_over_error,
+        g.nu_eff_used_in_astrometry, g.pseudocolour, g.ecl_lat,
+        g.ruwe, g.astrometric_params_solved
+    FROM gaiadr3.gaia_source AS g
+    WHERE g.ra  BETWEEN {RA_MIN}  AND {RA_MAX}
+      AND g.dec BETWEEN {DEC_MIN} AND {DEC_MAX}
+      AND g.phot_g_mean_mag     < {MAX_G}
+      AND g.parallax            > {MIN_PLX}
+      AND g.parallax_over_error > {MIN_PLX_SNR}
+    """
+    print("Step 1: querying Gaia DR3 ...", flush=True)
+    gaia_t = query(gaia_query)
+    print(f"  {len(gaia_t)} sources")
+    gaia_t.write(path_data_raw + 'raw_gaia.fits', format='fits', overwrite=True)
 
 # ==============================================================================
-# 4. PanSTARRS DR1
+# 2. BailerJones — sky box query, no upload needed
 # ==============================================================================
-ps_query = """
-SELECT bn.source_id AS dr3_source_id,
-       ps.g_mean_psf_mag, ps.g_mean_psf_mag_error,
-       ps.r_mean_psf_mag, ps.r_mean_psf_mag_error,
-       ps.i_mean_psf_mag, ps.i_mean_psf_mag_error,
-       ps.z_mean_psf_mag, ps.z_mean_psf_mag_error,
-       ps.y_mean_psf_mag, ps.y_mean_psf_mag_error
-FROM user_upload.my_sources AS up
-INNER JOIN gaiadr3.panstarrs1_best_neighbour AS bn ON up.source_id = bn.source_id
-INNER JOIN external.panstarrs1_original_valid AS ps ON bn.original_ext_source_id = ps.obj_id
-"""
-print("Querying PanSTARRS DR1 ...")
-ps_t = Gaia.launch_job_async(ps_query).get_results()
-print(f"  {len(ps_t)} rows")
-ps_t.write(path + 'raw_panstarrs.fits', format='fits', overwrite=True)
+if SKIP_BJ:
+    print("Step 2: loading BailerJones from file ...", flush=True)
+    bj_t = Table.read(path_data_raw + 'raw_bailerjones.fits')
+else:
+    bj_query = f"""
+    SELECT d.source_id, d.r_med_geo, d.r_lo_geo, d.r_hi_geo
+    FROM external.gaiaedr3_distance AS d
+    INNER JOIN gaiadr3.gaia_source AS g ON d.source_id = g.source_id
+    WHERE g.ra  BETWEEN {RA_MIN} AND {RA_MAX}
+      AND g.dec BETWEEN {DEC_MIN} AND {DEC_MAX}
+      AND d.r_med_geo > 0 AND d.r_med_geo < {MAX_DIST_PC}
+    """
+    print("Step 2: querying BailerJones ...", flush=True)
+    bj_t = query(bj_query)
+    print(f"  {len(bj_t)} rows")
+    bj_t.write(path_data_raw + 'raw_bailerjones.fits', format='fits', overwrite=True)
 
 # ==============================================================================
-# 5. Rybizki+2022 fidelity, cross-match via Gaia TAP
-#    The fidelity table is hosted on the Gaia archive as an external catalog.
-#    We join on source_id using the already-uploaded my_sources table.
+# 3. 2MASS — sky box query
 # ==============================================================================
-fidelity_query = """
-SELECT up.source_id, f.fidelity_v2 AS fidelity
-FROM user_upload.my_sources AS up
-INNER JOIN external.gaiadr3_spurious AS f ON up.source_id = f.source_id
-"""
-print("Querying Rybizki+2022 fidelity ...")
-try:
-    fidelity_t = Gaia.launch_job_async(fidelity_query).get_results()
-    print(f"  {len(fidelity_t)} rows with fidelity")
-    fidelity_t.write(path + 'raw_fidelity.fits', format='fits', overwrite=True)
-except Exception as e:
-    print(f"  Fidelity query failed ({e})")
-    print("  Continuing without fidelity, RUWE-only cut will be used in script 2")
-    fidelity_t = None
+if SKIP_TMASS:
+    print("Step 3: loading 2MASS from file ...", flush=True)
+    tmass_t = Table.read(path_data_raw + 'raw_2mass.fits')
+else:
+    tmass_query = f"""
+    SELECT bn.source_id AS dr3_source_id,
+           tmass.j_m, tmass.j_msigcom,
+           tmass.h_m, tmass.h_msigcom,
+           tmass.ks_m, tmass.ks_msigcom, tmass.ph_qual
+    FROM gaiadr3.gaia_source AS g
+    INNER JOIN gaiadr3.tmass_psc_xsc_best_neighbour AS bn ON g.source_id = bn.source_id
+    INNER JOIN gaiadr3.tmass_psc_xsc_join AS xj ON bn.clean_tmass_psc_xsc_oid = xj.clean_tmass_psc_xsc_oid
+    INNER JOIN gaiadr2.tmass_original_valid AS tmass ON xj.original_psc_source_id = tmass.designation
+    WHERE g.ra  BETWEEN {RA_MIN} AND {RA_MAX}
+      AND g.dec BETWEEN {DEC_MIN} AND {DEC_MAX}
+      AND g.phot_g_mean_mag     < {MAX_G}
+      AND g.parallax            > {MIN_PLX}
+      AND g.parallax_over_error > {MIN_PLX_SNR}
+    """
+    print("Step 3: querying 2MASS ...", flush=True)
+    tmass_t = query(tmass_query)
+    print(f"  {len(tmass_t)} rows")
+    tmass_t.write(path_data_raw + 'raw_2mass.fits', format='fits', overwrite=True)
 
+# ==============================================================================
+# 4. PanSTARRS — sky box query
+# ==============================================================================
+if SKIP_PS:
+    print("Step 4: loading PanSTARRS from file ...", flush=True)
+    ps_t = Table.read(path_data_raw + 'raw_panstarrs.fits')
+else:
+    ps_query = f"""
+    SELECT bn.source_id AS dr3_source_id,
+           ps.g_mean_psf_mag, ps.g_mean_psf_mag_error,
+           ps.r_mean_psf_mag, ps.r_mean_psf_mag_error,
+           ps.i_mean_psf_mag, ps.i_mean_psf_mag_error,
+           ps.z_mean_psf_mag, ps.z_mean_psf_mag_error,
+           ps.y_mean_psf_mag, ps.y_mean_psf_mag_error
+    FROM gaiadr3.gaia_source AS g
+    INNER JOIN gaiadr3.panstarrs1_best_neighbour AS bn ON g.source_id = bn.source_id
+    INNER JOIN external.panstarrs1_original_valid AS ps ON bn.original_ext_source_id = ps.obj_id
+    WHERE g.ra  BETWEEN {RA_MIN} AND {RA_MAX}
+      AND g.dec BETWEEN {DEC_MIN} AND {DEC_MAX}
+      AND g.phot_g_mean_mag     < {MAX_G}
+      AND g.parallax            > {MIN_PLX}
+      AND g.parallax_over_error > {MIN_PLX_SNR}
+    """
+    print("Step 4: querying PanSTARRS ...", flush=True)
+    ps_t = query(ps_query)
+    print(f"  {len(ps_t)} rows")
+    ps_t.write(path_data_raw + 'raw_panstarrs.fits', format='fits', overwrite=True)
+
+# ==============================================================================
+# 5. Fidelity — sky box query
+# ==============================================================================
+if SKIP_FIDELITY:
+    print("Step 5: loading fidelity from file ...", flush=True)
+    try:
+        fidelity_t = Table.read(path_data_raw + 'raw_fidelity.fits')
+    except FileNotFoundError:
+        print("  Fidelity file not found, skipping.", flush=True)
+        fidelity_t = None
+else:
+    fidelity_query = f"""
+    SELECT g.source_id, f.fidelity_v2 AS fidelity
+    FROM gaiadr3.gaia_source AS g
+    INNER JOIN external.gaiadr3_spurious AS f ON g.source_id = f.source_id
+    WHERE g.ra  BETWEEN {RA_MIN} AND {RA_MAX}
+      AND g.dec BETWEEN {DEC_MIN} AND {DEC_MAX}
+      AND g.phot_g_mean_mag     < {MAX_G}
+      AND g.parallax            > {MIN_PLX}
+      AND g.parallax_over_error > {MIN_PLX_SNR}
+    """
+    print("Step 5: querying fidelity ...", flush=True)
+    try:
+        fidelity_t = query(fidelity_query)
+        print(f"  {len(fidelity_t)} rows")
+        fidelity_t.write(path_data_raw + 'raw_fidelity.fits', format='fits', overwrite=True)
+    except Exception as e:
+        print(f"  Fidelity query failed ({e}), continuing without it.")
+        fidelity_t = None
+        
 # ==============================================================================
 # 6. Merge
 # ==============================================================================
-print("Merging ...")
+print("Step 7: merging ...", flush=True)
+bj_t   = bj_t[np.array(bj_t['r_med_geo']) < MAX_DIST_PC]
+merged = join(gaia_t, bj_t, keys='source_id', join_type='inner')
+print(f"  After BailerJones distance cut: {len(merged)}")
 tmass_clean = unique(tmass_t, keys='dr3_source_id')
-merged = join(gaia_t,  tmass_clean, keys_left='source_id', keys_right='dr3_source_id', join_type='left')
-merged = join(merged,  ps_t,        keys_left='source_id', keys_right='dr3_source_id', join_type='left')
+merged = join(merged, tmass_clean, keys_left='source_id', keys_right='dr3_source_id', join_type='left')
+merged = join(merged, ps_t,        keys_left='source_id', keys_right='dr3_source_id', join_type='left')
 if fidelity_t is not None:
     merged = join(merged, fidelity_t, keys='source_id', join_type='left')
     n_fid = np.sum(np.isfinite(np.array(merged['fidelity'], dtype=float)))
     print(f"  Fidelity matched: {n_fid}")
-assert len(merged) == len(gaia_t), f"Row count changed: {len(gaia_t)} -> {len(merged)}"
 print(f"  Total: {len(merged)}"
       f"  |  2MASS: {np.sum(np.isfinite(np.array(merged['j_m'], dtype=float)))}"
       f"  |  PS: {np.sum(np.isfinite(np.array(merged['g_mean_psf_mag'], dtype=float)))}")
 
 # ==============================================================================
-# 6. Parallax zero-point correction (Lindegren+2021 + Maiz Apellaniz 2022)
+# 7. Parallax zero-point correction (Lindegren+2021 + Maiz Apellaniz 2022)
 # ==============================================================================
 def ZPEDR3(gmag, nueff, lat, npar):
     gcut = np.array([6.0,10.8,11.2,11.8,12.2,12.9,13.1,15.9,16.1,17.5,19.0,20.0,21.0])
@@ -179,7 +267,7 @@ def ZPEDR3(gmag, nueff, lat, npar):
     qi=lambda g,q: np.interp(g,gcut,q)
     z5=(qi(gmag,q500)*b0+qi(gmag,q501)*b1+qi(gmag,q502)*b2+qi(gmag,q510)*c1*b0+qi(gmag,q511)*c1*b1+qi(gmag,q520)*c2*b0+qi(gmag,q530)*c3*b0+qi(gmag,q540)*c4*b0)
     z6=(qi(gmag,q600)*b0+qi(gmag,q601)*b1+qi(gmag,q602)*b2+qi(gmag,q610)*c1*b0+qi(gmag,q611)*c1*b1+qi(gmag,q612)*c1*b2+qi(gmag,q620)*c2*b0)
-    return [z5[j] if npar[j]==5 else z6[j] for j in range(n)]   # µas
+    return [z5[j] if npar[j]==5 else z6[j] for j in range(n)]
 
 def SPICOR(spi, gmag, ruwe, npar):
     gref=np.array([6.50,7.50,8.50,9.50,10.25,10.75,11.25,11.75,12.25,12.75,13.25,13.75,14.25,14.75,15.25,15.75,16.25,16.75,17.25,17.75])
@@ -191,7 +279,7 @@ def SPICOR(spi, gmag, ruwe, npar):
     k=np.where(ruwe>1.4,k*(1+ke),k); k=np.where(np.array(npar)==6,k*1.25,k)
     return np.sqrt((spi*k)**2+0.0103**2)
 
-print("Applying parallax corrections ...")
+print("Step 8: applying parallax corrections ...", flush=True)
 Gmag     = np.array(merged['phot_g_mean_mag'])
 nueff    = np.array(merged['nu_eff_used_in_astrometry'])
 pscol    = np.array(merged['pseudocolour'])
@@ -205,15 +293,15 @@ nparam   = np.where(npar_raw==31, 5, 6)
 nueffnew = np.where(npar_raw==31, nueff, pscol)
 Gmagc    = np.clip(Gmag, 6.0, None)
 
-ZP = np.array(ZPEDR3(Gmagc, nueffnew, eclat, nparam)) / 1000.   # µas → mas
+ZP = np.array(ZPEDR3(Gmagc, nueffnew, eclat, nparam)) / 1000.
 merged['parallax_corrected']       = parrobs - ZP
 merged['parallax_error_corrected'] = SPICOR(eparr, Gmagc, RUWE, nparam)
 print(f"  ZP mean = {np.nanmean(ZP):.4f} mas"
       f"  |  before: {1000/np.nanmean(parrobs):.0f} pc"
       f"  |  after:  {1000/np.nanmean(parrobs-ZP):.0f} pc")
 
-merged.write(f"{path_data}catalog_complete_{name_complex}.fits", format='fits', overwrite=True)
-print(f"Saved -> {path_data}catalog_complete_{name_complex}.fits  ({len(merged)} sources)")
+merged.write(f"{path_data_processed}catalog_complete_{name_complex}.fits", format='fits', overwrite=True)
+print(f"Saved -> {path_data_processed}catalog_complete_{name_complex}.fits  ({len(merged)} sources)")
 print(f"Parallax range: {np.nanmin(merged['parallax_corrected']):.3f} to {np.nanmax(merged['parallax_corrected']):.3f} mas")
 print(f"Distance range: {1000/np.nanmax(merged['parallax_corrected']):.0f} to {1000/np.nanmin(merged['parallax_corrected']):.0f} pc")
 print(f"G mag range: {np.nanmin(Gmag):.1f} to {np.nanmax(Gmag):.1f}")

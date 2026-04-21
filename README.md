@@ -120,7 +120,13 @@ and produces sky plots. Output: `images/hdbscan/` and `images/compare/`
 ## References
 
 - Quintana et al. (2025)
-- Hernández et al. (2023)
+- Speagle et al. (2024) — brutus isochrone fitting code https://github.com/joshspeagle/brutus
+- Speagle (2020) — dynesty nested sampling
+- Koposov et al. — dynesty (current maintainers)
+- Kroupa (2001) — IMF used in MIST/brutus
+- Choi et al. (2016) — MIST stellar models
+- Dotter (2016) — MIST/EEP framework
+- Hernández et al. (2023) 
 - Sanchez-Sanjuan (2024) — region labels
 - Lindegren et al. (2021) — Gaia DR3 parallax zero-point
 - Maíz Apellániz (2022) — SPICOR correction
