@@ -8,12 +8,12 @@ Run one cluster at a time:
     python script3_fit.py <cluster_id>
     python script3_fit.py <cluster_id> --resume
 
-Output : <path_out>/brutus_<name>/cluster_<id>/samples.npy
-                                    results.npy
-                                    logz.npy
-                                    corner.png
-                                    checkpoint.save
-                                    powell_best.npy
+Output : outputs/brutus_<name_complex>/cluster_<id>_<name_cluster>/samples.npy
+                                    				results.npy
+                                    				logz.npy
+                                    				corner.png
+                                    				checkpoint.save
+                                    				powell_best.npy
 """
 
 import os
@@ -36,17 +36,20 @@ from brutus.utils import inv_magnitude
 from brutus.data import filters as bfilters
 from tutorial_utils import find_brutus_data_file
 
-# ==============================================================================
-# Global settings
-# ==============================================================================
-path_data    = 'data/processed'
-path_out 	 = 'outputs/'
+# ----------- Paths 
+path_data    = 'data/processed/'
+path_out 	 = 'outputs/brutus_'
 name_complex = 'Orion_OB1'
-out_base     = path_out + 'brutus_' + name_complex + '/'
+name_cluster = 'ONC'
+out_base     = path_out + name_complex + '/'
+os.makedirs(path_data, exist_ok=True)
+os.makedirs(path_out, exist_ok=True)
+
+# ----------- Global parameters 
 MIN_SAMPLES  = 37
 PMEM_CUT     = 0.5
 N_WORKERS    = 6
-NLIVE        = 400
+NLIVE        = 200
 
 # ==============================================================================
 # Parameter configuration
@@ -55,6 +58,7 @@ NLIVE        = 400
 # Set fixed=<value> to hold it constant.
 # lo, hi define the prior range (used whether free or fixed for bounds checking).
 # init is the Powell starting guess (only used if free).
+# below an example for the ONC cluster
 #
 #               fixed    lo      hi     init
 PARAMS = {
@@ -91,7 +95,7 @@ if len(sys.argv) < 2:
 CLUSTER_ID  = int(sys.argv[1])
 RESUME_MODE = '--resume' in sys.argv
 
-out_dir         = out_base + f'cluster_{CLUSTER_ID}/'
+out_dir         = out_base + f'cluster_{CLUSTER_ID}_{name_cluster}/'
 CHECKPOINT_FILE = out_dir + 'checkpoint.save'
 os.makedirs(out_dir, exist_ok=True)
 
@@ -193,7 +197,7 @@ def log_likelihood(theta_free):
 if __name__ == '__main__':
     import psutil
 
-    catalog = Table.read(path_data + f'hdbscan_clusters_ms{MIN_SAMPLES}.fits')
+    catalog = Table.read(path_data + f'hdbscan_clusters_{name_complex}_ms{MIN_SAMPLES}.fits')
     mask_cl = np.array(catalog['cluster_id']) == CLUSTER_ID
     if not np.any(mask_cl):
         print(f"Cluster ID {CLUSTER_ID} not found.")
@@ -299,7 +303,7 @@ if __name__ == '__main__':
                 use_pool={'prior_transform': False, 'loglikelihood': True},
                 sample='rwalk',
                 bound='single',
-                walks=15,
+                walks=25,
             )
 
         print("Running nested sampling ...", flush=True)

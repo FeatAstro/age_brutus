@@ -6,8 +6,8 @@ Same algorithm as Quintana et al. (2025):
   features = (X, Y, Z, cv·Vl, cv·Vb)
   with LSR-corrected proper motions converted to transverse velocities.
 
-Input  : <path_data>/catalog_complete_<name>.fits
-Output : <path_out>/hdbscan_clusters_<name>ms<MIN_SAMPLES>.fits
+Input  : <path_data>/catalog_complete_<name_complex>.fits
+Output : <path_out>/hdbscan_clusters_<name_complex>_ms<MIN_SAMPLES>.fits
 """
 
 import numpy as np
@@ -18,10 +18,14 @@ from astropy.coordinates import SkyCoord, GalacticLSR
 import astropy.units as u
 from sklearn.cluster import HDBSCAN
 
-path_data    = 'data/processed'
-path_out 	 = 'outputs/'
-path_im 	 = 'images/HDBSCAN/'
+# ----------- Paths 
+path_data    = 'data/processed/'
+path_out 	 = 'outputs/hdbscan/'
+path_im 	 = 'images/hdbscan/'
 name_complex = 'Orion_OB1'
+os.makedirs(path_data, exist_ok=True)
+os.makedirs(path_out, exist_ok=True)
+os.makedirs(path_im, exist_ok=True)
 
 # ----------- Parameters 
 MIN_CLUSTER_SIZE = 15
@@ -41,10 +45,10 @@ print(f"Loaded {len(t)} sources")
 # ----------- Parallax: 3σ cut around TTS median -> 2.0 - 3.6 mas (~277 - 500 pc) 
 plx_corr  = np.array(t['parallax_corrected'])
 plxe_corr = np.array(t['parallax_error_corrected'])
-plx_cut   = (plx_corr >= 2.0) & (plx_corr <= 3.6)
+plx_cut   = (plx_corr >= 2.0) & (plx_corr <= 3.6) # should be the same as script 1
 
 # ----------- Parallax relative uncertainty < 5% 
-plx_snr_cut = (plxe_corr / plx_corr) < 0.05
+plx_snr_cut = (plxe_corr / plx_corr) < 0.05 # should be the same as script 1
 
 # ----------- Total proper motion: 6*sigma cut < 5.425 mas/yr 
 pmra   = np.array(t['pmra'])
@@ -72,7 +76,7 @@ BP_mag = np.array(t['phot_bp_mean_mag'])
 RP_mag = np.array(t['phot_rp_mean_mag'])
 dist_pc = 1000.0 / plx_corr                          # simple inversion, only used for CMD cut
 M_RP    = RP_mag - 5*np.log10(dist_pc) + 5           # absolute RP magnitude
-BP_RP   = BP_mag - RP_mag                             # colour index
+BP_RP   = BP_mag - RP_mag                            # colour index
 cmd_cut = (BP_RP <= 1.0) | (M_RP < 2.6 + 2.1*BP_RP)  # cut only applies for BP-RP > 1.0
 
 # ----------- Combine all cuts 
@@ -243,9 +247,9 @@ for k, col in zip(unique_labels, colors):
 
 plt.xlabel('X (pc)'); plt.ylabel('Y (pc)')
 plt.title(f'Found {n_clusters} stellar groups')
-plt.tight_layout(); plt.savefig(path_im + f'hdbscan_{name_complex}ms{MIN_SAMPLES}_XY.png', dpi=150); plt.show()
+plt.tight_layout(); plt.savefig(path_im + f'hdbscan_{name_complex}_ms{MIN_SAMPLES}_XY.png', dpi=150); plt.show()
 
 full_catalog = vstack(cluster_catalog)
-out = path_out + f'hdbscan_clusters_{name_complex}ms{MIN_SAMPLES}.fits'
+out = path_out + f'hdbscan_clusters_{name_complex}_ms{MIN_SAMPLES}.fits'
 full_catalog.write(out, format='fits', overwrite=True)
 print(f"Saved -> {out}  ({len(full_catalog)} members in {len(cluster_catalog)} clusters)")

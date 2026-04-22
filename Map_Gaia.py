@@ -5,9 +5,9 @@ Script 3a — Visualise HDBSCAN clusters on a RA/Dec sky map
 Optionally cross-matches with a Sanchez-Sanjuan reference catalog
 to label clusters with known region names.
 
-Input  : <path_data>/hdbscan_clusters_ms<MIN_SAMPLES>.fits
-         <path_data>/Big_Structures_5Dparams_SanchezSanjuan2024_filtered.fits  (optional)
-Output : <path_image>/hdbscan_map_ms<MIN_SAMPLES>.png
+Input  : outputs/hdbscan/hdbscan_clusters_<name_complex>_ms<MIN_SAMPLES>.fits
+         data/processed/Big_Structures_5Dparams_SanchezSanjuan2024_filtered.fits  (optional)
+Output : images/compare/hdbscan_map_<name_complex>_ms<MIN_SAMPLES>.png
 """
 
 import numpy as np
@@ -15,10 +15,14 @@ import matplotlib.pyplot as plt
 from astropy.table import Table, join
 import os
 
-path_data    = 'data/'
+# ----------- Paths 
+path_data    = 'data/processed/'
+path_hdbscan = 'outputs/hdbscan/'
 path_im 	 = 'images/compare/'
+name_cluster = 'Orion_OB1'
 os.makedirs(path_image, exist_ok=True)
 
+# ----------- Parameters 
 MIN_SAMPLES = 37
 
 # Sanchez-Sanjuan region names — edit for other complexes or set to None to skip
@@ -42,7 +46,7 @@ NEW_COLORS = [
 ]
 
 # load HDBSCAN catalog
-my_clusters = Table.read(path_data + f'hdbscan_clusters_ms{MIN_SAMPLES}.fits')
+my_clusters = Table.read(path_hdbscan + f'hdbscan_clusters_ms{MIN_SAMPLES}.fits')
 all_ids     = sorted(set(np.array(my_clusters['cluster_id'])))
 print(f"Loaded {len(my_clusters)} members in {len(all_ids)} clusters")
 
@@ -145,7 +149,7 @@ ax.set_xlabel('RA (deg)'); ax.set_ylabel('Dec (deg)')
 ax.grid(alpha=0.3)
 
 plt.tight_layout()
-out = path_image + f'hdbscan_map_ms{MIN_SAMPLES}.png'
+out = path_image + f'hdbscan_map_{name_cluster}_ms{MIN_SAMPLES}.png'
 plt.savefig(out, dpi=150, bbox_inches='tight')
 plt.show()
 print(f"Saved: {out}")

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 Script 1 — Download from Gaia archive and apply parallax correction
 ===================================================================
@@ -16,7 +16,7 @@ Usage:
     python Download_Gaia.py --skip-fidelity        # skip step 6
     python Download_Gaia.py --skip-gaia --skip-bj  # combine any flags
 
-Output : <path_data_processed>/catalog_complete_<name>.fits
+Output : <path_data_processed>/catalog_complete_<name_complex>.fits
 """
 
 import os
@@ -31,23 +31,25 @@ from scipy.interpolate import CubicSpline
 warnings.simplefilter('ignore', AstropyWarning)
 Gaia.ROW_LIMIT = -1
 
-# ----------- Parameters
+# ----------- Paths 
 path_data_raw       = 'data/raw/'
 path_data_processed = 'data/processed/'
+name_complex 		= 'Orion_OB1'
 os.makedirs(path_data_raw, exist_ok=True)
 os.makedirs(path_data_processed, exist_ok=True)
 
-name_complex = 'Orion_OB1'
-
+# ----------- Parameters
+# Sky box and distance range — specific to a given complex
 RA_MIN  =  75.0
 RA_MAX  =  90.0
 DEC_MIN = -14.0
 DEC_MAX =  16.0
 
-MAX_DIST_PC = 1000.0
+PLX_MIN 	= 2.0   # mas — Orion OB1 range
+PLX_MAX 	= 3.6   # mas 
+PLX_SNR_MIN = 20.0
+
 MAX_G       =   19.0
-MIN_PLX     =    0.5
-MIN_PLX_SNR =    5.0
 
 # ----------- Skip flags
 SKIP_GAIA     = '--skip-gaia'     in sys.argv
@@ -66,16 +68,17 @@ def query(q):
         t.rename_column(col, col.lower())
     return t
 
+
 # ==============================================================================
 # 0. Test
 # ==============================================================================
-job = Gaia.launch_job_async("""
-SELECT TOP 100 source_id, ra, dec, parallax
-FROM gaiadr3.gaia_source
-WHERE ra BETWEEN 83 AND 84
-AND dec BETWEEN -6 AND -5
-""")
-print(job.get_results())
+#job = Gaia.launch_job_async("""
+#SELECT TOP 10 source_id, ra, dec, parallax
+#FROM gaiadr3.gaia_source
+#WHERE ra BETWEEN 83 AND 84
+#AND dec BETWEEN -6 AND -5
+#""")
+#print(job.get_results())
 
 # ==============================================================================
 # 1. Gaia DR3
@@ -104,8 +107,9 @@ else:
     WHERE g.ra  BETWEEN {RA_MIN}  AND {RA_MAX}
       AND g.dec BETWEEN {DEC_MIN} AND {DEC_MAX}
       AND g.phot_g_mean_mag     < {MAX_G}
-      AND g.parallax            > {MIN_PLX}
-      AND g.parallax_over_error > {MIN_PLX_SNR}
+      AND g.parallax            > {PLX_MIN}
+      AND g.parallax            < {PLX_MAX}
+      AND g.parallax_over_error > {PLX_SNR_MIN}
     """
     print("Step 1: querying Gaia DR3 ...", flush=True)
     gaia_t = query(gaia_query)
@@ -120,13 +124,18 @@ if SKIP_BJ:
     bj_t = Table.read(path_data_raw + 'raw_bailerjones.fits')
 else:
     bj_query = f"""
-    SELECT d.source_id, d.r_med_geo, d.r_lo_geo, d.r_hi_geo
-    FROM external.gaiaedr3_distance AS d
-    INNER JOIN gaiadr3.gaia_source AS g ON d.source_id = g.source_id
-    WHERE g.ra  BETWEEN {RA_MIN} AND {RA_MAX}
-      AND g.dec BETWEEN {DEC_MIN} AND {DEC_MAX}
-      AND d.r_med_geo > 0 AND d.r_med_geo < {MAX_DIST_PC}
-    """
+	SELECT 
+		d.source_id, d.r_med_geo, d.r_lo_geo, d.r_hi_geo
+		FROM external.gaiaedr3_distance AS d
+		INNER JOIN gaiadr3.gaia_source AS g ON d.source_id = g.source_id
+		WHERE g.ra  BETWEEN {RA_MIN} AND {RA_MAX}
+		  AND g.dec BETWEEN {DEC_MIN} AND {DEC_MAX}
+		  AND g.phot_g_mean_mag     < {MAX_G}
+		  AND g.parallax            > {PLX_MIN}
+		  AND g.parallax            < {PLX_MAX}
+		  AND g.parallax_over_error > {PLX_SNR_MIN}
+		  AND d.r_med_geo > 0
+		"""
     print("Step 2: querying BailerJones ...", flush=True)
     bj_t = query(bj_query)
     print(f"  {len(bj_t)} rows")
@@ -151,8 +160,9 @@ else:
     WHERE g.ra  BETWEEN {RA_MIN} AND {RA_MAX}
       AND g.dec BETWEEN {DEC_MIN} AND {DEC_MAX}
       AND g.phot_g_mean_mag     < {MAX_G}
-      AND g.parallax            > {MIN_PLX}
-      AND g.parallax_over_error > {MIN_PLX_SNR}
+      AND g.parallax            > {PLX_MIN}
+      AND g.parallax 			< {PLX_MAX}
+      AND g.parallax_over_error > {PLX_SNR_MIN}
     """
     print("Step 3: querying 2MASS ...", flush=True)
     tmass_t = query(tmass_query)
@@ -179,8 +189,9 @@ else:
     WHERE g.ra  BETWEEN {RA_MIN} AND {RA_MAX}
       AND g.dec BETWEEN {DEC_MIN} AND {DEC_MAX}
       AND g.phot_g_mean_mag     < {MAX_G}
-      AND g.parallax            > {MIN_PLX}
-      AND g.parallax_over_error > {MIN_PLX_SNR}
+      AND g.parallax            > {PLX_MIN}
+      AND g.parallax 			< {PLX_MAX}
+      AND g.parallax_over_error > {PLX_SNR_MIN}
     """
     print("Step 4: querying PanSTARRS ...", flush=True)
     ps_t = query(ps_query)
@@ -205,8 +216,9 @@ else:
     WHERE g.ra  BETWEEN {RA_MIN} AND {RA_MAX}
       AND g.dec BETWEEN {DEC_MIN} AND {DEC_MAX}
       AND g.phot_g_mean_mag     < {MAX_G}
-      AND g.parallax            > {MIN_PLX}
-      AND g.parallax_over_error > {MIN_PLX_SNR}
+      AND g.parallax            > {PLX_MIN}
+      AND g.parallax 			< {PLX_MAX}
+      AND g.parallax_over_error > {PLX_SNR_MIN}
     """
     print("Step 5: querying fidelity ...", flush=True)
     try:
@@ -220,8 +232,7 @@ else:
 # ==============================================================================
 # 6. Merge
 # ==============================================================================
-print("Step 7: merging ...", flush=True)
-bj_t   = bj_t[np.array(bj_t['r_med_geo']) < MAX_DIST_PC]
+print("Step 6: merging ...", flush=True)
 merged = join(gaia_t, bj_t, keys='source_id', join_type='inner')
 print(f"  After BailerJones distance cut: {len(merged)}")
 tmass_clean = unique(tmass_t, keys='dr3_source_id')
