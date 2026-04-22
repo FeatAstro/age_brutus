@@ -7,8 +7,6 @@ in the Orion OB1 complex, combining 5D kinematic clustering with Bayesian
 isochrone fitting to derive ages, distances, extinctions, and metallicities
 for stellar groups within ~1 kpc of the Sun, using Brutus algorithm.
 
-Methodology follows Quintana et al. (2025).
-
 ---
 
 ## Repository layout
